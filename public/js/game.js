@@ -81,8 +81,29 @@ export class Input {
     this.jump = false;
     this.jumpQueued = false;
     this.jumpHeld = false;
+    this.lastDir = 0; // 最近按下的方向，两键同按时它优先
   }
+
+  /** 按下/松开某个方向键（-1 左 / 1 右） */
+  setDir(dir, pressed) {
+    const wasDown = dir === -1 ? this.left : this.right;
+    if (dir === -1) this.left = pressed;
+    else this.right = pressed;
+
+    // 只有「从松到按」才更新优先级，避免键盘长按重复触发导致方向来回抢
+    if (pressed && !wasDown) {
+      this.lastDir = dir;
+    } else if (!pressed && this.lastDir === dir) {
+      // 松开当前优先方向 → 回退到仍按着的另一侧
+      if (dir === -1 && this.right) this.lastDir = 1;
+      else if (dir === 1 && this.left) this.lastDir = -1;
+      else this.lastDir = 0;
+    }
+  }
+
   get x() {
+    // 两个方向同时按住时，以「最后按下的」为准，实现无延迟换向
+    if (this.left && this.right) return this.lastDir;
     return (this.right ? 1 : 0) - (this.left ? 1 : 0);
   }
   pressJump() {
@@ -167,21 +188,20 @@ export class Player {
 
     /* --- 墙面 --- */
     this.wall = this.onGround ? 0 : this.probeWalls(lv);
-    const pressingIntoWall = this.wall !== 0 && ix === this.wall;
+    const wallGrab = this.wall !== 0 && !this.onGround;
+    const towardWall = wallGrab && ix === this.wall;
 
     this.wallSliding = false;
     this.climbing = false;
 
-    if (this.wall !== 0 && !this.onGround && pressingIntoWall) {
-      if (this.climbStamina > 0 && this.vy > -200) {
-        // 攀墙：贴住墙往上爬
+    if (towardWall) {
+      // 贴墙 + 朝墙按住：按住跳键才向上攀爬，不按跳就缓慢下滑
+      if (input.jumpHeld && this.climbStamina > 0) {
         this.climbing = true;
         this.climbStamina -= dt;
         this.vy = P.WALL_CLIMB;
       } else {
-        // 体力耗尽 → 下滑
         this.wallSliding = true;
-        if (this.vy > P.WALL_SLIDE) this.vy = P.WALL_SLIDE;
       }
     }
 
@@ -195,8 +215,8 @@ export class Player {
     }
 
     if (wantJump) {
-      if (this.wall !== 0 && !this.onGround) {
-        // 反墙跳：朝反方向弹开，并刷新二段跳
+      if (wallGrab && !towardWall) {
+        // 反墙跳：不朝墙按住时按跳 → 朝反方向弹开，并刷新二段跳
         this.vx = -this.wall * P.WALL_JUMP_X;
         this.vy = P.WALL_JUMP_Y;
         this.jumps = P.MAX_JUMPS - 1;
@@ -204,9 +224,11 @@ export class Player {
         this.facing = -this.wall;
         this.squash = 1.3;
         this.wall = 0;
-        // 必须清掉攀爬状态，否则下面的攀爬加速会把反墙跳的速度覆盖掉
         this.climbing = false;
         this.wallSliding = false;
+      } else if (towardWall) {
+        // 朝墙按住时按跳 = 开始攀爬，不消耗二段跳
+        this.climbing = true;
       } else if (this.onGround || this.coyote > 0) {
         this.vy = P.JUMPV;
         this.onGround = false;
@@ -221,13 +243,14 @@ export class Player {
       }
     }
 
-    // 松开跳跃键提前收力，实现长按跳更高
-    if (!input.jumpHeld && this.vy < -180) this.vy = -180;
-    if (input.jumpHeld && this.climbing) this.vy = P.WALL_CLIMB * 1.35;
+    // 松开跳跃键提前收力，实现长按跳更高（攀爬时不受此影响）
+    if (!input.jumpHeld && this.vy < -180 && !this.climbing) this.vy = -180;
 
     /* --- 重力 --- */
     this.vy += P.GRAV * dt * (this.onGround ? 1 : 1.12);
     if (this.vy > P.MAXFALL) this.vy = P.MAXFALL;
+    // 下滑限速必须放在重力之后，否则会被重力叠加顶穿
+    if (this.wallSliding && this.vy > P.WALL_SLIDE) this.vy = P.WALL_SLIDE;
 
     /* --- 位移与碰撞 --- */
     this.moveAndCollide(lv, dt);
@@ -307,6 +330,7 @@ export class Game {
     this.player = null;
     this.particles = [];
     this.camera = { x: 0, y: 0 };
+    this.lookX = 0; // 平滑的朝向预判偏移，避免换向时镜头突跳
     this.running = false;
     this.paused = false;
     this.acc = 0;
@@ -346,9 +370,13 @@ export class Game {
     this.canvas.height = Math.round(ch * dpr);
 
     const aspect = cw / ch;
-    let LW = 360 * aspect;
-    let LH = 360;
-    if (LW < 520) { LW = 520; LH = LW / aspect; }
+    const portrait = aspect < 1;
+    // 竖屏以高度为基准，避免可视区被拉得过高、角色小到看不清
+    const baseH = portrait ? 540 : 360;
+    const minW = portrait ? 300 : 520;
+    let LH = baseH;
+    let LW = LH * aspect;
+    if (LW < minW) { LW = minW; LH = LW / aspect; }
     if (LW > 1150) { LW = 1150; LH = LW / aspect; }
     this.viewW = LW;
     this.viewH = LH;
@@ -364,6 +392,7 @@ export class Game {
     this.coins = 0;
     this.deaths = 0;
     this.paused = false;
+    this.lookX = 0;
     this.camera.x = this.player.cx - this.viewW / 2;
     this.camera.y = this.player.cy - this.viewH / 2;
     this._clampCamera();
@@ -406,6 +435,7 @@ export class Game {
     p.climbStamina = P.CLIMB_STAMINA;
     p.dead = false;
     this.deaths++;
+    this.lookX = 0;
     this.camera.x = p.cx - this.viewW / 2;
     this.camera.y = p.cy - this.viewH / 2;
     this._clampCamera();
@@ -498,11 +528,12 @@ export class Game {
       q.y += q.vy * dt;
     }
 
-    /* 相机 */
-    const tx = p.cx - this.viewW / 2 + p.facing * 40;
+    /* 相机：朝向预判做平滑，换方向时画面不会突然抽搐 */
+    this.lookX += (p.facing * 34 - this.lookX) * Math.min(1, dt * 2.6);
+    const tx = p.cx - this.viewW / 2 + this.lookX;
     const ty = p.cy - this.viewH * 0.55;
-    this.camera.x += (tx - this.camera.x) * Math.min(1, dt * 7);
-    this.camera.y += (ty - this.camera.y) * Math.min(1, dt * 7);
+    this.camera.x += (tx - this.camera.x) * Math.min(1, dt * 6.5);
+    this.camera.y += (ty - this.camera.y) * Math.min(1, dt * 6.5);
     this._clampCamera();
   }
 
