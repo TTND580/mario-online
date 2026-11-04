@@ -95,7 +95,7 @@
   <div class="card profile-card" id="profileBox">
     <div class="avatar-wrap">
       <img id="avatarImg" class="avatar" alt="头像">
-      <button id="btnCamera" class="avatar-edit">拍照</button>
+      <button id="btnCamera" class="avatar-edit">换头像</button>
     </div>
     <div class="profile-name" id="profileName">未登录</div>
     <div class="profile-stats" id="profileStats"></div>
@@ -147,7 +147,12 @@
         <button class="btn small" id="btnPublish">发布</button>
       </div>
     </div>
-    <div class="edit-hint" id="editHint">点格子放组件，拖动可画一整片</div>
+    <div class="edit-tools">
+      <button class="btn small ghost" id="btnMode">✋ 移动模式</button>
+      <button class="btn small ghost" id="btnZoomOut">－</button>
+      <button class="btn small ghost" id="btnZoomIn">＋</button>
+      <span class="edit-hint" id="editHint">单指画，双指拖动缩放</span>
+    </div>
   </div>
 </section>
 
@@ -162,7 +167,7 @@
 <div id="toast" class="toast"></div>
 
 <canvas id="camCanvas" class="hidden"></canvas>
-<video id="camVideo" class="hidden" playsinline></video>
+<input id="avatarFile" type="file" accept="image/*" class="hidden">
 
 <script type="module" src="/js/app.js"></script>
 </body>
