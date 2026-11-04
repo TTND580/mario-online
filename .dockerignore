@@ -1,0 +1,7 @@
+node_modules
+data/db.json
+data/avatars
+test
+docs
+*.log
+启动游戏.cmd
