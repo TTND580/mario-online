@@ -2,6 +2,7 @@
   "name": "mario-online",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "description": "Mobile-first open-map platformer with level workshop, accounts and leaderboards",
   "main": "server.mjs",
   "scripts": {
