@@ -198,7 +198,9 @@ body{
 .edit-meta input{flex:1 1 130px;min-width:110px;padding:10px 12px;font-size:14px}
 .edit-btns{display:flex;gap:6px;flex:0 0 auto}
 .edit-btns .btn{padding:9px 12px;font-size:13.5px}
-.edit-hint{color:var(--dim);font-size:11.5px;margin-top:8px;text-align:center}
+.edit-hint{color:var(--dim);font-size:11.5px;margin-top:0;text-align:right;flex:1}
+.edit-tools{display:flex;gap:6px;align-items:center;margin-top:8px}
+.edit-tools .btn{padding:8px 11px;font-size:13px}
 
 /* ---------- 底部导航 ---------- */
 #tabbar{
