@@ -101,46 +101,53 @@ console.log('\n[2] 跳跃 / 二段跳');
   input.releaseJump();
 }
 
-/* ---------------- 3. 攀墙 ---------------- */
-console.log('\n[3] 攀墙');
+/* ---------------- 3. 攀墙 / 下滑 ---------------- */
+console.log('\n[3] 攀墙与下滑');
 {
-  // 右侧有一堵 3 格高的墙（第 5 列）
   const lv = makeLevel([
     '....................',
     '....................',
     '....................',
-    '.....|..............'.replace('|', '#'),
+    '.....#..............',
     '.....#..............',
     '.....#..............',
     '..S..#..............',
     '####################',
     '####################',
-  ].map((r) => r.replace(/\|/g, '#')));
+  ]);
 
   const p = new Player(0, 0);
-  // 手动放到墙左侧、离地悬空
-  p.x = 5 * TILE - p.w - 1;   // 右边缘紧贴第 5 列左面
+  p.x = 5 * TILE - p.w - 1;   // 右边缘紧贴墙
   p.y = 4 * TILE;
   p.vx = 0;
   p.vy = 0;
   p.onGround = false;
 
   const input = new Input();
-  input.right = true;         // 朝墙方向按住
+  input.setDir(1, true);      // 朝墙按住，但不按跳
 
-  const y0 = p.y;
-  const stamina0 = p.climbStamina;
-  step(p, lv, input, 10);
+  const yStart = p.y;
+  step(p, lv, input, 8);
 
   check('检测到右侧墙壁', p.wall === 1, `wall=${p.wall}`);
-  check('进入攀爬状态', p.climbing === true);
-  check('攀爬时向上移动', p.y < y0, `y ${y0.toFixed(1)} → ${p.y.toFixed(1)}`);
+  check('不按跳时不是攀爬', p.climbing === false, `climbing=${p.climbing}`);
+  check('不按跳时进入下滑状态', p.wallSliding === true, `wallSliding=${p.wallSliding}`);
+  check('不按跳会往下掉', p.y > yStart, `y ${yStart.toFixed(1)} → ${p.y.toFixed(1)}`);
+  check('下滑速度被限制住', p.vy <= 155, `vy=${p.vy.toFixed(1)}`);
+
+  // 按住跳 → 开始攀爬
+  input.pressJump();
+  const yBeforeClimb = p.y;
+  const stamina0 = p.climbStamina;
+  step(p, lv, input, 12);
+
+  check('按住跳开始攀爬', p.climbing === true, `climbing=${p.climbing}`);
+  check('攀爬时向上移动', p.y < yBeforeClimb, `y ${yBeforeClimb.toFixed(1)} → ${p.y.toFixed(1)}`);
   check('攀爬消耗体力', p.climbStamina < stamina0, `体力 ${stamina0.toFixed(2)} → ${p.climbStamina.toFixed(2)}`);
 
   // 体力耗尽后转为下滑
-  step(p, lv, input, 90);
-  check('体力耗尽后不再上升（转为下滑）', p.climbing === false, `climbing=${p.climbing}, stamina=${p.climbStamina.toFixed(2)}`);
-  check('下滑速度受限', p.vy <= 155, `vy=${p.vy.toFixed(1)}`);
+  step(p, lv, input, 100);
+  check('体力耗尽后不再上升', p.climbing === false, `climbing=${p.climbing}`);
 }
 
 /* ---------------- 4. 反墙跳 ---------------- */
@@ -166,16 +173,36 @@ console.log('\n[4] 反墙跳');
   p.onGround = false;
 
   const input = new Input();
-  input.right = true;   // 贴住墙
+  input.setDir(1, true);      // 先贴住墙
   step(p, lv, input, 3);
   check('贴墙状态下检测到墙', p.wall !== 0, `wall=${p.wall}`);
 
+  // 松开朝墙方向（不再朝墙按），再按跳 → 反墙跳
+  input.setDir(1, false);
   input.pressJump();
   p.step(FIXED_DT, lv, input);
+
   check('反墙跳把角色弹向左（远离墙）', p.vx < -200, `vx=${p.vx.toFixed(1)}`);
   check('反墙跳给出向上速度', p.vy < -400, `vy=${p.vy.toFixed(1)}`);
   check('反墙跳后刷新二段跳', p.jumps === 1, `jumps=${p.jumps}`);
   input.releaseJump();
+}
+
+/* ---------------- 4b. 方向切换优先级 ---------------- */
+console.log('\n[4b] 换向优先级');
+{
+  const input = new Input();
+  input.setDir(1, true);
+  check('只按右 → 方向为 1', input.x === 1, `x=${input.x}`);
+
+  input.setDir(-1, true);   // 长按右的同时突然按左
+  check('长按右时按左 → 立刻变为 -1', input.x === -1, `x=${input.x}`);
+
+  input.setDir(-1, false);  // 松开左，右还按着
+  check('松开左后回到 1（右仍按着）', input.x === 1, `x=${input.x}`);
+
+  input.setDir(1, false);
+  check('全部松开 → 0', input.x === 0, `x=${input.x}`);
 }
 
 /* ---------------- 5. 冰面 ---------------- */
