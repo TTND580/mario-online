@@ -1,0 +1,14 @@
+{
+  "name": "mario-online",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Mobile-first open-map platformer with level workshop, accounts and leaderboards",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node test/physics.test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
