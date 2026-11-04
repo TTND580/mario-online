@@ -1,68 +1,69 @@
 # 公网部署指南
 
 项目是**零依赖 Node 应用**，不需要 `npm install`，任何能跑 Node 的地方都能跑。
-`Dockerfile` 和 `.dockerignore` 已经写好，云平台会自动识别。
+`Dockerfile` 和 `.dockerignore` 已写好，云平台会自动识别。
 
 ---
 
-## 关键：数据持久化
+## ⚠️ 先看这个：为什么不能用"免费层"
 
-游戏数据在 `data/` 目录（`db.json` + 头像）。
+这个项目要存**账号、密码哈希、地图数据**，必须有持久化存储。
 
-**必须挂持久化磁盘到 `/app/data`**，否则容器重启后所有账号和地图都会没。
-各平台都叫 Volume / Disk / 持久化存储，挂载路径填 `/app/data`。
+| 平台 | 免费层 | 持久化 | 结论 |
+| --- | --- | --- | --- |
+| Render 免费 | ✅ | ❌ 无磁盘 | ❌ 闲置 15 分钟休眠重启，数据全丢 |
+| Koyeb 免费 | ✅ | ❌ 无卷 | ❌ 同上 |
+| Zeabur | — | — | ❌ 2026 年已停止服务 |
+| **Railway** | $5 试用额度 | ✅ 持久卷 | ✅ **推荐** |
+
+Railway 一个小 Node 应用月成本约 **$0.5~1.5**，$5 试用额度能用好几个月。
+如果试用额度用完又不续费，服务会停，但**数据不会丢**，续费就恢复。
 
 ---
 
-## 方案一：Zeabur（国内访问快，推荐）
+## 方案一：Railway（推荐）
 
-1. 打开 https://zeabur.com 用 GitHub 登录
-2. 新建项目 → Deploy from GitHub → 选这个仓库
-3. 它会自动识别 Dockerfile，直接部署
-4. 部署完成后：服务 → 存储 → 添加 Volume，挂载路径填 `/app/data`
-5. 服务 → 网络 → 生成域名
+1. 打开 https://railway.com → **Login** → 选 **GitHub**
+2. **New Project** → **Deploy from GitHub repo**
+3. 授权并选择 `TTND580/mario-online`
+4. Railway 自动识别 Dockerfile 开始构建（1~3 分钟）
+5. 构建完成后，点进服务 → **Settings** → **Networking** → **Generate Domain**
+6. **必须做**：服务页 → **Volumes** → **Add Volume** → Mount Path 填 `/app/data`
 
-## 方案二：Railway
+第 6 步不做的话，每次重新部署数据都会清空。
 
-1. https://railway.app 用 GitHub 登录
-2. New Project → Deploy from GitHub repo
-3. 自动识别 Dockerfile
-4. 添加 Volume，Mount path 填 `/app/data`
-5. Settings → Networking → Generate Domain
+**验证部署成功：**
 
-## 方案三：Render
+```bash
+curl https://你的域名.up.railway.app/api/info
+# 应返回 {"port":8080,"lan":[...],"maps":0,"users":0}
+```
 
-1. https://render.com 用 GitHub 登录
-2. New → Web Service → 连仓库
-3. Runtime 选 **Docker**
-4. 加 Disk：Mount Path `/app/data`，大小 1GB 够用很久
-5. 免费实例会休眠，第一次访问要等十几秒唤醒
+---
 
-## 方案四：自己的云服务器
+## 方案二：自己的云服务器（长期最省）
 
 ```bash
 # 装 Node 20+
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt install -y nodejs
+sudo apt install -y nodejs git
 
-# 拉代码
-git clone <你的仓库地址> mario-online
+git clone https://github.com/TTND580/mario-online.git
 cd mario-online
 
-# 用 pm2 常驻
+# pm2 常驻
 sudo npm i -g pm2
 PORT=8787 pm2 start server.mjs --name mario-online
 pm2 save && pm2 startup
-
-# Nginx 反代（可选，让 80 端口直接访问）
 ```
 
-Nginx 配置片段：
+Nginx 反代：
 
 ```nginx
 server {
     listen 80;
     server_name 你的域名;
+
     location / {
         proxy_pass http://127.0.0.1:8787;
         proxy_set_header Host $host;
@@ -72,49 +73,43 @@ server {
 }
 ```
 
+本地 `data/` 目录天然持久，不需要额外配置。
+
 ---
 
-## 部署前要改的地方
-
-### 1. 端口
-本地默认 `8787`，云平台一般要求监听 `PORT` 环境变量。代码已支持：
-
-```js
-const PORT = Number(process.env.PORT || 8787);
-```
-
-Dockerfile 里设的是 `8080`，按平台要求改。
-
-### 2. 部署后必须做的验证
+## 部署后的验收清单
 
 ```bash
+BASE=https://你的域名
+
 # 1. 服务活着
-curl https://你的域名/api/info
+curl $BASE/api/info
 
 # 2. 注册能用
-curl -X POST https://你的域名/api/register \
+curl -X POST $BASE/api/register \
   -H "Content-Type: application/json" \
   -d '{"username":"testuser","password":"test123456"}'
 
-# 3. 数据持久化（关键）——重启服务后重新注册同名用户
-#    如果返回「这个用户名已被注册」，说明 Volume 挂对了
-#    如果能重新注册成功，说明数据没持久化，去检查挂载路径
+# 3. 持久化验证（关键）
+#    重新部署一次，然后用同一个用户名再注册
+#    返回「这个用户名已被注册」= Volume 挂对了
+#    能注册成功 = 数据没持久化，去检查挂载路径是不是 /app/data
 ```
 
-### 3. 手机访问
+## 手机访问注意
 
-部署好之后，手机直接打开 `https://你的域名` 即可。
-**注意**：相机拍照（设头像）在 HTTPS 下才能用，浏览器要求安全上下文。
-本地 `http://192.168.x.x` 访问时摄像头会被浏览器禁用，这是正常的，
-部署到 HTTPS 域名后就正常了。
+- **相机拍头像必须 HTTPS**，浏览器只在安全上下文开放摄像头。
+  Railway 分配的域名自带 HTTPS，所以部署后拍照功能才可用。
+- 局域网 `http://192.168.x.x` 下摄像头会被浏览器禁用，这是正常现象。
 
 ---
 
-## 为什么不建议用免费隧道
+## 为什么放弃免费隧道
 
-试过 `localhost.run` 和 `localtunnel`，两者在带 HTTPS 中间人代理的网络环境下都不稳定：
+实测过 `localhost.run`、`localtunnel`、`pinggy` 三种免费隧道，在带 HTTPS 中间人代理的网络环境下全部失败：
 
-- localhost.run：SSH 转发建立后边缘一直 502
-- localtunnel：能拿到地址，但几分钟后变成 `503 Tunnel Unavailable`
+- localhost.run：SSH 转发建立后边缘持续 502
+- localtunnel：拿到地址几分钟后变 `503 Tunnel Unavailable`
+- pinggy：SSH 连上但不输出公网地址
 
-隧道只适合临时演示，而且电脑关机就断。要给别人长期玩，还是得真部署。
+隧道只适合临时演示，且电脑关机即断。长期给别人玩必须真部署。
