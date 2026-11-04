@@ -189,54 +189,75 @@ async function loadMyMaps() {
   }
 }
 
-async function openCamera() {
+/** 从相册选图（不调用摄像头，http 下也能用） */
+function pickAvatar() {
+  const input = $('avatarFile');
+  if (!input) return;
+  input.value = '';
+  input.click();
+}
+
+function loadImageFromFile(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(img);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('这张图片无法读取，换一张试试'));
+    };
+    img.src = url;
+  });
+}
+
+/** 居中裁成正方形，缩到 256，压缩后作为头像 */
+function makeAvatarDataUrl(img, size = 256) {
+  const cv = $('camCanvas');
+  cv.width = size;
+  cv.height = size;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#121722';
+  ctx.fillRect(0, 0, size, size);
+
+  const iw = img.naturalWidth || img.width;
+  const ih = img.naturalHeight || img.height;
+  const side = Math.min(iw, ih);
+  const sx = (iw - side) / 2;
+  const sy = (ih - side) / 2;
+  ctx.drawImage(img, sx, sy, side, side, 0, 0, size, size);
+
+  return cv.toDataURL('image/jpeg', 0.85);
+}
+
+async function onAvatarPicked(ev) {
+  const file = ev.target.files && ev.target.files[0];
+  if (!file) return;
+  if (!/^image\//.test(file.type)) {
+    toast('请选择图片文件');
+    return;
+  }
+  if (file.size > 12 * 1024 * 1024) {
+    toast('图片太大了，换张小一点的');
+    return;
+  }
   const btn = $('btnCamera');
   btn.disabled = true;
-  btn.textContent = '启动中…';
-  let stream = null;
+  btn.textContent = '上传中…';
   try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 640 } },
-      audio: false,
-    });
-    const video = $('camVideo');
-    video.srcObject = stream;
-    await video.play();
-
-    // 等第一帧
-    await new Promise((r) => setTimeout(r, 320));
-
-    const size = 256;
-    const cv = $('camCanvas');
-    cv.width = size;
-    cv.height = size;
-    const ctx = cv.getContext('2d');
-    const vw = video.videoWidth || 640;
-    const vh = video.videoHeight || 640;
-    const side = Math.min(vw, vh);
-    const sx = (vw - side) / 2;
-    const sy = (vh - side) / 2;
-    ctx.drawImage(video, sx, sy, side, side, 0, 0, size, size);
-
-    const dataUrl = cv.toDataURL('image/jpeg', 0.85);
+    const img = await loadImageFromFile(file);
+    const dataUrl = makeAvatarDataUrl(img, 256);
     const res = await api.setAvatar(dataUrl);
     state.user = res.user;
     $('avatarImg').src = `${res.user.avatar}?t=${Date.now()}`;
     toast('头像已更新');
   } catch (e) {
-    const msg = String(e.message || e);
-    if (/NotAllowed|Permission|denied/i.test(msg)) {
-      toast('相机权限被拒绝，请在浏览器设置里允许');
-    } else if (/NotFound|Devices/i.test(msg)) {
-      toast('没找到摄像头');
-    } else {
-      toast(msg.slice(0, 40));
-    }
+    toast(String(e.message || e).slice(0, 40));
   } finally {
-    if (stream) stream.getTracks().forEach((t) => t.stop());
-    $('camVideo').srcObject = null;
     btn.disabled = false;
-    btn.textContent = '拍照';
+    btn.textContent = '换头像';
   }
 }
 
@@ -345,21 +366,21 @@ function bindTouchControls(input) {
     el.addEventListener('pointercancel', up);
     el.addEventListener('pointerleave', up);
   };
-  bind($('btnLeft'), () => { input.left = true; }, () => { input.left = false; });
-  bind($('btnRight'), () => { input.right = true; }, () => { input.right = false; });
+  bind($('btnLeft'), () => input.setDir(-1, true), () => input.setDir(-1, false));
+  bind($('btnRight'), () => input.setDir(1, true), () => input.setDir(1, false));
   bind($('btnJump'), () => input.pressJump(), () => input.releaseJump());
 }
 
 function bindKeyboard(input) {
   window.addEventListener('keydown', (e) => {
     if (current !== 'game') return;
-    if (e.key === 'ArrowLeft' || e.key === 'a') input.left = true;
-    if (e.key === 'ArrowRight' || e.key === 'd') input.right = true;
+    if (e.key === 'ArrowLeft' || e.key === 'a') input.setDir(-1, true);
+    if (e.key === 'ArrowRight' || e.key === 'd') input.setDir(1, true);
     if (e.key === ' ' || e.key === 'ArrowUp' || e.key === 'w') { e.preventDefault(); input.pressJump(); }
   });
   window.addEventListener('keyup', (e) => {
-    if (e.key === 'ArrowLeft' || e.key === 'a') input.left = false;
-    if (e.key === 'ArrowRight' || e.key === 'd') input.right = false;
+    if (e.key === 'ArrowLeft' || e.key === 'a') input.setDir(-1, false);
+    if (e.key === 'ArrowRight' || e.key === 'd') input.setDir(1, false);
     if (e.key === ' ' || e.key === 'ArrowUp' || e.key === 'w') input.releaseJump();
   });
 }
@@ -460,6 +481,14 @@ function initEditor() {
     document.querySelectorAll('.pal').forEach((b) => b.classList.toggle('active', b === btn));
   });
 
+  $('btnMode').onclick = () => {
+    const m = editor.setMode(editor.mode === 'paint' ? 'pan' : 'paint');
+    $('btnMode').textContent = m === 'pan' ? '✏️ 画笔模式' : '✋ 移动模式';
+    $('editHint').textContent = m === 'pan' ? '单指拖动查看地图' : '单指画，双指拖动缩放';
+  };
+  $('btnZoomIn').onclick = () => editor.zoomBy(1.3);
+  $('btnZoomOut').onclick = () => editor.zoomBy(0.77);
+
   $('btnClear').onclick = () => {
     if (confirm('确定清空整张地图吗？')) {
       editor.clear();
@@ -505,29 +534,6 @@ function enterEditor() {
   setTimeout(() => editor.resize(), 60);
 }
 
-/* ================= 旋转提示 ================= */
-function setupRotateHint() {
-  const el = document.createElement('div');
-  el.id = 'rotateHint';
-  el.style.cssText = `position:fixed;inset:0;background:#0b0e14;z-index:90;display:none;
-    align-items:center;justify-content:center;flex-direction:column;gap:14px;
-    color:#e8edf6;font-size:16px;text-align:center;padding:30px;`;
-  el.innerHTML = '<div style="font-size:52px">📱↻</div><div>把手机横过来，玩起来更舒服</div>' +
-    '<button class="btn small ghost" id="rotSkip">就这样也能玩</button>';
-  document.body.appendChild(el);
-
-  let skipped = false;
-  const check = () => {
-    const portrait = window.innerHeight > window.innerWidth * 1.1;
-    const playing = current === 'game';
-    el.style.display = portrait && playing && !skipped ? 'flex' : 'none';
-  };
-  $('rotSkip').onclick = () => { skipped = true; check(); };
-  window.addEventListener('resize', check);
-  window.addEventListener('orientationchange', () => setTimeout(check, 150));
-  setInterval(check, 800);
-}
-
 /* ================= 事件绑定 ================= */
 function bindGlobal() {
   document.body.addEventListener('click', (e) => {
@@ -568,14 +574,14 @@ function bindGlobal() {
   $('searchBtn').onclick = () => loadLevels();
   $('searchInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') loadLevels(); });
 
-  $('btnCamera').onclick = () => requireLogin(openCamera);
+  $('btnCamera').onclick = () => requireLogin(pickAvatar);
+  $('avatarFile').addEventListener('change', onAvatarPicked);
   $('btnLogout').onclick = logout;
 }
 
 /* ================= 启动 ================= */
 async function boot() {
   bindGlobal();
-  setupRotateHint();
   setAuthMode('login');
   checkDevice();
 
